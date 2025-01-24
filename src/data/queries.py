@@ -203,7 +203,7 @@ def customers_with_orders_over_threshold(threshold:int):
     except (psycopg2.DatabaseError, Exception) as error:
         print(error)
 
-def get_highest_number_of_items(items:int):
+def get_orders_with_highest_number_of_items(items:int):
     command = f"""
     SELECT o.id, oi.quantity
     FROM orders o
@@ -222,8 +222,138 @@ def get_highest_number_of_items(items:int):
     except (psycopg2.DatabaseError, Exception) as error:
         print(error)
 
+def get_average_number_of_orders_per_day():
+    command = """
+    SELECT AVG(total_orders) AS average_daily_sales
+    FROM (
+        SELECT DATE_TRUNC('day', order_date) AS order_day, COUNT(o.id) AS total_orders
+        FROM orders o
+        GROUP BY order_day
+    ) AS daily_sales_counts;
+    """
+    try:
+        with psycopg2.connect(**config()) as conn:
+            with conn.cursor() as cur:
+                cur.execute(command)
+                average_daily_sales = cur.fetchone()
+                print(f"Average Daily order amount: {average_daily_sales[0]:.2f}")
+    except (psycopg2.DatabaseError, Exception) as error:
+        print(error)
+
+    
+def get_daily_orders_per_time(threshold:int):
+    command = f"""
+    SELECT DATE_TRUNC('day', o.order_date) AS order_day, COUNT(DISTINCT o.id) AS total_orders
+    FROM orders o
+    GROUP BY order_day
+    HAVING COUNT(DISTINCT o.id) >= {threshold}
+    ORDER BY order_day
+    """
+    try:
+        with psycopg2.connect(**config()) as conn:
+            with conn.cursor() as cur:
+                cur.execute(command)
+                daily_orders = cur.fetchall()
+                for row in daily_orders:
+                    order_day = row[0].strftime('%Y-%m-%d')  # Format date as YYYY-MM-DD
+                    total_orders = row[1]
+                    print(f"Order Day: {order_day}, Total Orders: {total_orders}")
+    except (psycopg2.DatabaseError, Exception) as error:
+        print(error)
+
+def average_delivery_time_per_month():
+    command = """
+    SELECT DATE_TRUNC('month', o.order_date) AS month, AVG(s.delivery_date-o.order_date) AS average_delivery_time
+    FROM orders o
+    JOIN shipments s
+    ON o.id = s.order_id
+    GROUP BY month
+    ORDER BY month;
+    """
+    try:
+        with psycopg2.connect(**config()) as conn:
+            with conn.cursor() as cur:
+                cur.execute(command)
+                monthly_breakdown = cur.fetchall()
+                for row in monthly_breakdown:
+                    month = row[0].strftime('%Y-%m')  # Format the month as YYYY-MM
+                    average_delivery_time = row[1]
+                    print(f"Month: {month}, Average Delivery Time: {average_delivery_time:.2f} days")
+    except (psycopg2.DatabaseError, Exception) as error:
+        print(error)
+
+def top_10_percentage_of_products_by_sales():
+    command = """
+
+    WITH ProductSales AS (
+    SELECT p.name, SUM(oi.price_at_purchase) AS total_product_sales
+    FROM products p
+    JOIN order_items oi ON p.id = oi.product_id
+    GROUP BY p.name
+    ),
+    Top10PercentSales AS (
+    SELECT PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY total_product_sales) as cutoff
+    FROM ProductSales  
+    ),
+    Top10Products AS (
+    SELECT name, total_product_sales
+    FROM ProductSales
+    WHERE total_product_sales >= (SELECT cutoff FROM Top10PercentSales)
+    )
+    SELECT 
+    (SUM(tp.total_product_sales) * 100.0) / (SELECT SUM(oi.price_at_purchase) FROM order_items oi)  AS percentage
+    FROM Top10Products tp;
+    
+    """
+    try:
+        with psycopg2.connect(**config()) as conn:
+            with conn.cursor() as cur:
+                cur.execute(command)
+                percentage = cur.fetchone()[0]  # Fetch the single percentage value
+                print(f"Percentage of sales from top 10% of products: {percentage:.2f}%") # Format to two decimal places
+    except (psycopg2.DatabaseError, Exception) as error:
+        print(error)
+
+
+def get_number_of_products_sold():
+    command = """
+    SELECT p.name, SUM(oi.quantity) AS total_quantity_count, SUM(oi.price_at_purchase) AS total_product_sales
+    FROM products p
+    JOIN order_items oi ON p.id = oi.product_id
+    GROUP BY p.name
+    ORDER BY total_product_sales DESC
+    """
+    try:
+        with psycopg2.connect(**config()) as conn:
+            with conn.cursor() as cur:
+                cur.execute(command)
+                top_products = cur.fetchall()
+                for row in top_products:
+                    print(f"Product: {row[0]}, Number of sold items: {row[1]}, Total euros {row[2]}")
+    except (psycopg2.DatabaseError, Exception) as error:
+        print(error)
+
+
+def products_that_have_never_been_ordered():
+    command = """
+    SELECT p.name
+    FROM products p
+    LEFT JOIN order_items oi ON p.id = oi.product_id
+    WHERE oi.product_id IS NULL
+    """
+    try:
+        with psycopg2.connect(**config()) as conn:
+            with conn.cursor() as cur:
+                cur.execute(command)
+                products = cur.fetchall()
+                for row in products:
+                    print(f"Product: {row[0]} has never been ordered.")
+    except (psycopg2.DatabaseError, Exception) as error:
+        print(error)
+
+
 def main():
-    #get_all_orders()
+    get_all_orders()
     #get_total_sales()
     #get_low_stock_products()
     #print("\nGrouping and Aggregations:")
@@ -237,8 +367,15 @@ def main():
     #top_suppliers()
     #print("\nNested Queries and Subqueries:")
     #customers_with_orders_over_threshold(9000)
-    #get_highest_number_of_items(10)
+    #get_orders_with_highest_number_of_items(10)
+    #get_average_number_of_orders_per_day()
+    #get_daily_orders_over_time()
+    #get_daily_orders_per_time(4)
+    #average_delivery_time_per_month()
+    #get_number_of_products_sold()
+    #top_10_percentage_of_products_by_sales()
+    #products_that_have_never_been_ordered()
 
 
-# if __name__ == '__main__':
-#     main()
+if __name__ == '__main__':
+    main()
